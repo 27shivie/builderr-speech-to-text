@@ -41,6 +41,14 @@ Your tool has to:
    actually release it.
 6. **Not cheat or break** — no hard-coded answers, no crashes, no repeating-gibberish loops.
 
+**This isn't meant to be easy — that's the point.** Just wrapping an off-the-shelf model gets
+you good English and broken Hindi+English. **You can't win on English alone** — the mixed-language
+part is the gate, and that's where the real building is (a router + a Hindi-capable model + a
+finalizer that stays faithful and fast, all local). And to take the $500, **your tool has to
+actually beat the best thing out there today** — the top free tools *and* our own engine — on
+the hidden set. If nothing clearly beats it, we award nothing. We're paying for a real step up,
+not a tie.
+
 <details><summary><b>The exact bar</b> (for the technically inclined)</summary>
 
 | What | Target | Where things are today |

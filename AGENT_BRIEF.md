@@ -231,6 +231,34 @@ Winner:
 Highest score after passing all gates, with ties broken by lower p95 latency.
 ```
 
+Two hard rules that keep this from being easy (and protect the bounty):
+
+- **You cannot win on English alone.** The Hindi+English (code-switch) gate is mandatory:
+  a submission that fails the Hinglish meaning + faithfulness bar does not place, no matter
+  how good its English is. English is near-solved by off-the-shelf models; the mix is the test.
+- **To take the prize you must beat the strongest baseline on the board** — the current best
+  engine (RambleFix) AND the best open-source tool — on the hidden set, not just clear a
+  threshold. If nothing clearly beats it, no prize is awarded (it rolls over). The bounty only
+  ever pays for a genuine step up over what exists today.
+
+### Why this isn't easy (the honest crack-path)
+
+A naive entry — wrap one off-the-shelf model (whisper.cpp / faster-whisper) — gets great
+English and ~0.91 word-error on Hinglish, because it silently translates the mix into English.
+That fails the faithfulness gate. The real (and only) winning path is harder:
+
+1. a fast foreground recognizer for the common English/Indian-English case (cheap, sub-second);
+2. a **permissive, small, Hindi-capable** recognizer for code-switch clips (the sourcing/licensing
+   is itself work — it must be commercial-friendly, ≤~5GB, CPU-runnable);
+3. a **router** that detects the Hinglish/risky clips and only then pays for the slower path
+   (run the heavy model on everything and you blow the latency gate);
+4. a **finalizer** that keeps the code-switch faithful (does NOT translate to English) while
+   fixing terms, numbers, and negation — without hallucinating or looping.
+
+That's a real engineering effort, and the payoff bar (meaning `>=0.90`, up from today's `~0.84`,
+while staying faithful and fast) is a meaningful wedge over everything free today — which is the
+point of paying for it.
+
 ## What Exactly Needs To Be Cracked
 
 The core unsolved thing is engine routing and finalization:
