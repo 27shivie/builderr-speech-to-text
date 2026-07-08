@@ -62,14 +62,18 @@ faithful romanized Hinglish, runs on Apple GPU (MPS) when present. Swap the mode
 to an empty draft (so the contract still validates) — it never crashes the run.
 
 > Note: these public substitutes are *RambleFix-class*, not byte-identical to the
-> engine that produced the official board number. The canonical figure to beat is the
-> one published on the leaderboard, measured on the frozen M1 Pro box.
+> engine that produced older board numbers. The canonical figure to beat must be the
+> RambleFix rerun on the same hidden corpus entrants are scored on, measured on the
+> frozen M1 Pro box.
 
 ## Known weaknesses — where it's beatable (aim here)
 
-Measured on the locked 60-clip set (22 English / 25 Hindi / 13 hi-en), one scorer,
-accelerator on. RambleFix lands **meaning ≈ 0.89, engine latency median ≈ 3s.**
-Faithful — but **not under the 2s bar.** The gaps, ranked by how winnable they are:
+Older component checks used smaller corpora, including a 60-clip set and a
+25-clip OpenSLR streaming slice. Treat those as evidence about weak spots, not as
+the official payout line. The official line must be produced by rerunning RambleFix
+on `data/hidden/manifest.json`, the same hidden corpus used for entrants. The
+known gap remains: faithful finals are not consistently under the 2s bar. The
+gaps, ranked by how winnable they are:
 
 1. **Latency is the headline gap (~3s vs the 2s target).** The async faithful
    finalizer is the bottleneck — Oriserve/Srota-class models via torch are accurate but
@@ -82,8 +86,9 @@ Faithful — but **not under the 2s bar.** The gaps, ranked by how winnable they
    above). If your final is late, that's what they read. Committing a *faithful* partial
    early beats this.
 
-3. **Hindi is the weak language (≈0.83 vs English ≈0.97).** Heavier Hindi or fast
-   code-switching is where it slips most. English-dominant clips it nearly nails.
+3. **Hindi-heavy and fast code-switching clips are the risk.** That is where the
+   hidden-set rerun matters most; do not infer the official score from only the
+   older OpenSLR or product corpora.
 
 4. **English term-flips.** On some clips it drops or mangles required terms/names — and
    the scorer caps hard on a flipped required term or number. A model that holds proper
@@ -92,9 +97,8 @@ Faithful — but **not under the 2s bar.** The gaps, ranked by how winnable they
 5. **Two-model overhead.** Running a draft model *and* a finalizer costs memory and
    warmup. A single fast+faithful model, if you can find one, sidesteps the whole race.
 
-**The bar in one line:** nobody is *fast AND faithful under 2s* yet. The fastest entry
-(~0.5s) holds only ~0.54 meaning; RambleFix holds 0.89 but needs ~3s. Close that gap
-and the $500 is yours.
+**The bar in one line:** nobody is *fast AND faithful under 2s* yet. Close that
+gap on the same hidden corpus as everyone else and the $500 is yours.
 
 ## Files
 

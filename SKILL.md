@@ -7,7 +7,7 @@ It's **direction, not a recipe** — the high-level shape that works, based on t
 ## The goal
 A speech-to-text engine that runs **locally and offline**, is **fast**, and is **faithful on
 Hindi+English code-switch** — it writes what was actually said, it doesn't translate the mix into
-English. Match the best free engines on English; **beat the benchmark on the mix**.
+English. Match the best free engines on English; **beat the same-corpus RambleFix line on the mix**.
 
 ## High-level architecture (the shape that works)
 It's not one model — it's a small pipeline:

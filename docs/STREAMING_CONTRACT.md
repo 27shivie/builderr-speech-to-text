@@ -93,7 +93,7 @@ streaming machinery (churn, TTFS usefulness, latency curves, caps).
 
 **The goal:** come close to Wispr Flow's *feel* — a good final within **~2 seconds** of you
 stopping. ~2s sits inside Wispr's real-world felt latency (1–2s) but is achievable locally and
-offline; today's best local engines sit around ~4.3s (RambleFix, measured), so ~2s is a real,
+offline; an older RambleFix OpenSLR component check landed around ~4.3s, so ~2s is a real,
 meaningful cut, not a vanity bar. We do NOT claim Wispr's ~700ms cloud lab number — sub-1s is the
 stretch ceiling, not the bar.
 
@@ -101,7 +101,7 @@ End-to-final (25 pts):
 ```
 <= 1000ms        -> 25   (Wispr-class stretch ceiling)
 1000–2000ms      -> linear 25 → 20   (~2s = the realistic target: strong score)
-2000–3500ms      -> linear 20 → 10   (RambleFix measured ~4.3s p50 lands just past here — beatable)
+2000–3500ms      -> linear 20 → 10   (the older RambleFix OpenSLR check landed just past here)
 3500–5000ms      -> linear 10 → 3
 > 5000ms         -> 0
 ```
@@ -189,7 +189,7 @@ machine is pinned here at launch and does not change for the round:
 
 ---
 
-## 6. RambleFix — the benchmark line (not a prize competitor)
+## 6. RambleFix — benchmark line and corpus rule
 
 RambleFix is the engine you're trying to beat. It is a **benchmark line only** and
 is **ineligible for the $500**. Its streaming shape: a warm local `whisper.cpp`
@@ -199,10 +199,19 @@ code-switch-faithful Hinglish finalizer replaces the final when it lands. The
 clean wrapper that runs it through this exact public harness is
 [`baseline/ramblefix_stream.py`](../baseline/ramblefix_stream.py).
 
-**Published RambleFix streaming numbers** — measured on the pinned frozen box (MacBook Pro
-14-inch 2021, Apple M1 Pro, 32 GB, macOS Tahoe 26.3.1), real-time WAV feeds, network off, over
-**25 real OpenSLR-104 Hindi+English clips** (2026-06-21). The §3.1 curve knees were committed
-**before** these were computed (pre-registration).
+**Hard corpus rule:** the official RambleFix qualifier line and every entrant must be
+scored on the **same hidden corpus** with the same `evaluator.py`,
+`streaming_scorecard.py`, pinned machine, warmup, and network block. The current
+official scoring manifest is `data/hidden/manifest.json` (96 rows: 20 FLEURS
+English, 20 FLEURS Hindi, 40 OpenSLR-104 Hindi+English, 16 YouTube English). If
+that manifest changes, the RambleFix line must be rerun before any prize decision.
+
+The numbers below are a **component check**, not the final payout line unless the
+official hidden manifest is exactly the same set. They were measured on the pinned
+frozen box (MacBook Pro 14-inch 2021, Apple M1 Pro, 32 GB, macOS Tahoe 26.3.1),
+real-time WAV feeds, network off, over **25 OpenSLR-104 Hindi+English clips**
+(2026-06-21). The §3.1 curve knees were committed **before** these were computed
+(pre-registration).
 
 | Axis | RambleFix (measured) | Notes |
 |---|---|---|
@@ -211,9 +220,10 @@ clean wrapper that runs it through this exact public harness is
 | Time-to-first-partial | **p50 2.0s** | first *useful* draft is still too late |
 | Hindi-English mix (final) | WER **0.21** · meaning **0.76** · terms **0.97** | keeps the actual words; cloud/free tools translate the mix away |
 
-This is the **bar to beat — and it's beatable.** RambleFix's faithful final is ~4.3s p50, above
-the 2s target, and its first useful partial is ~2s. Get the final under ~2s and the first useful
-partial under ~1s while keeping the mix faithful (meaning past ~0.90) — that's where the $500 is won.
+This shows the likely weak spot: RambleFix's faithful final was ~4.3s p50 on the
+OpenSLR slice, above the 2s target, and its first useful partial was ~2s. To
+qualify for payout, beat the RambleFix rerun on the same hidden corpus used for
+entrants while keeping the mix faithful.
 
 > **Order constraint (pre-registration proof):** the §3.1 curve knees are finalized
 > and committed first; RambleFix's streaming numbers are computed and published

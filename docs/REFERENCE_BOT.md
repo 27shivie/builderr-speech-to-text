@@ -1,8 +1,9 @@
 # The reference bot — how RambleFix was built
 
-RambleFix is the engine you're trying to beat. It was built by the person running this
-challenge, and it's the current **bar to beat** on the board. This page is the *approach* —
-not the source. Read it to understand what works, then build your own (better) version.
+RambleFix is the engine used as the benchmark candidate. It was built by the person running this
+challenge. The official bar to beat must be RambleFix scored on the same hidden corpus as entrants.
+This page is the *approach* — not the source. Read it to understand what works, then build your own
+(better) version.
 
 ## What it's trying to do (the objectives)
 
@@ -46,9 +47,9 @@ It's not one model — it's a small pipeline:
 Throughout, it keeps the raw candidates + timings + which model ran, so every decision is
 auditable (that's also part of the score here).
 
-## Where it actually lands (your bar)
+## Where it lands in component checks
 
-Measured in a live head-to-head against the best free engines, same clips:
+Measured in live head-to-head checks against the best free engines, same clips:
 
 | | RambleFix | Best free tool |
 |---|---|---|
@@ -57,7 +58,8 @@ Measured in a live head-to-head against the best free engines, same clips:
 
 Read that carefully: on **English it's basically tied** with free tools (and a bit slower).
 On the **mix it's ~8× more faithful** — because the free tools translate Hindi into English and
-lose what was actually said. **That gap is the whole opportunity.**
+lose what was actually said. **That gap is the whole opportunity.** The official prize bar still
+has to be the same-corpus hidden-set rerun.
 
 ## What we learned the hard way (use these)
 
@@ -73,7 +75,7 @@ lose what was actually said. **That gap is the whole opportunity.**
 
 ## How you beat it
 
-You don't need RambleFix's code. You need to push the **mix** past it — meaning **≥0.90**
-(it's at ~0.84) while staying **faithful** and **fast**, and matching it on English. That usually
-means a better router, a better finalizer, or a better permissive Hindi model than it uses today.
+You don't need RambleFix's code. You need to push the **mix** past the hidden-set RambleFix line
+while staying **faithful** and **fast**, and matching it on English. That usually means a better
+router, a better finalizer, or a better permissive Hindi model than it uses today.
 Full targets are in the [README](../README.md).
