@@ -6,7 +6,7 @@ This is the harness builderr runs. It launches the entrant's sealed
   1. opens one WebSocket per run,
   2. feeds the WAV at 1x real time as 20ms binary PCM frames (absolute-time paced,
      so jitter never accumulates),
-  3. captures partial/final events on a monotonic RECEIVE clock,
+  3. captures the final event on a monotonic RECEIVE clock,
   4. repeats 5 times with per-run anti-replay jitter (gain + tiny resample),
   5. scores via streaming_scorecard.score_stream_run — latency on the 5-run
      median, quality on the median-latency run's final.
@@ -424,13 +424,13 @@ def main():
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return
     print(f"\n  streaming score   {res['overall_score']}/100")
-    print(f"  meaning {res['meaning_mean']}   WER {res['wer_mean']}   churn {res['churn_mean']}")
-    print(f"  median end-to-final {res['median_end_to_final_ms']}ms   median TTFS {res['median_ttfs_ms']}ms")
-    print(f"  reliability-ok {res['reliability_ok_rate']}   clips capped {res['clips_capped']}/{res['n']}")
+    print(f"  meaning {res['meaning_mean']}   WER {res['wer_mean']}")
+    print(f"  median end-to-final {res['median_end_to_final_ms']}ms")
+    print(f"  final-ok {res['final_ok_rate']}   clips capped {res['clips_capped']}/{res['n']}")
     for c in res["clips"]:
         flag = f"  capped@{c['capped_at']}" if c["capped_at"] else ""
-        print(f"    {c['clip_id'][:28]:28s} score {c['score']:6}  e2f {c['median_end_to_final_ms']}ms"
-              f"  ttfs {c['median_ttfs_ms']}ms{flag}  {';'.join(c['reasons'][:2])}")
+        print(f"    {c['clip_id'][:28]:28s} score {c['score']:6}  final {c['median_end_to_final_ms']}ms"
+              f"{flag}  {';'.join(c['reasons'][:2])}")
 
 
 if __name__ == "__main__":

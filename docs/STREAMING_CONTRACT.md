@@ -1,230 +1,128 @@
-# Streaming dictation track — the contract (single source of truth)
+# Live dictation contract
 
-This is the one document that defines the streaming track. README, SKILL, and
-GETTING_STARTED link here and never restate the weights. If anything elsewhere
-disagrees with this file, this file wins.
+This is the single source of truth for the $500 dictation challenge. If another
+file disagrees with it, this file wins.
 
-There is **ONE prize: $500**, ranked on **ONE combined weighted score** out of
-100. RambleFix is the **benchmark line** you are trying to beat — it can never
-take the prize.
+There is one prize and one score out of 100. RambleFix is the benchmark to beat
+and cannot win the prize.
 
----
+## What you build
 
-## 1. What you build: ONE function
-
-You do **not** build a server. You write one function, `draft()`, in
-[`solution/draft.py`](../solution/draft.py). The streaming server, the real-time
-audio feed, and the event wire are a **sealed harness** builderr provides
-([`solution/stream_server.py`](../solution/stream_server.py) — header says
-DO NOT EDIT; it is replaced with the official copy at scoring time).
+Implement `draft()` in [`solution/draft.py`](../solution/draft.py):
 
 ```python
 def draft(audio_buffer: bytes, is_final: bool) -> tuple[str, int]:
-    """audio_buffer = ALL audio so far (PCM s16le, mono, 16kHz).
-    Called repeatedly as audio arrives (is_final=False), once after the user
-    stops (is_final=True). Return (text_so_far, stable_chars)."""
+    """Return your best transcript of all audio received so far."""
 ```
 
-- `text_so_far`: your best transcript of the audio heard so far. **Keep the
-  Hindi-English code-switch faithful** — write what was actually said; do **not**
-  translate the mix into English (the scorecard caps that).
-- `stable_chars`: length of the leading prefix of `text_so_far` you **commit** to
-  (promise never to rewrite). Must be **non-decreasing** across calls, and the
-  committed prefix string may only be **extended**. Rewriting committed text is
-  counted as **revision churn**.
+The sealed harness sends 16 kHz mono PCM audio in real time. It calls `draft()`
+while audio arrives and once after the user stops. Your final call should return
+the text that would be pasted into the user's active app.
 
-Preview yourself, offline, exactly like admission:
+Keep Hindi-English code-switching faithful. Write what was said; do not translate
+the mix into English.
+
+`stable_chars` and intermediate drafts are optional UI metadata. They receive no
+points, trigger no caps, and have no effect on ranking.
+
+## Wire protocol
+
+Evaluator to solution:
+
+```jsonc
+{"type":"start","sample_rate":16000,"format":"pcm_s16le","channels":1,"clip_id":"<opaque>"}
+// binary 20 ms PCM frames at 1x real time
+{"type":"end"}
+```
+
+Solution to evaluator:
+
+```jsonc
+{"type":"partial","text":"rollback abhi mat","stable_chars":11}  // optional, unscored
+{"type":"final","text":"rollback abhi mat karo, pehle p95 check karlo"}  // exactly one
+{"type":"meta","model_ids":["..."],"local_only":true}  // optional, unscored audit
+```
+
+Entrant timestamps are ignored. The evaluator measures final latency on its own
+monotonic receive clock.
+
+## Scoring
+
+| Metric | Weight | What counts |
+|---|---:|---|
+| Final meaning and fidelity | 50 | Does the final preserve what the speaker meant, including the language mix? |
+| Critical facts and terms | 20 | Numbers, negation, names, and required terms must survive in the final. |
+| Final paste latency | 30 | Median time from the last audio frame to receipt of the final over five runs. |
+
+Only the final transcript and final paste latency count. There is no scoring for
+time-to-first-partial, partial quality, partial stability, or revision churn.
+
+Quality is judged on the final from the median-latency run. Final paste latency
+uses the median over five repeated runs.
+
+### Final latency points
+
+```text
+<= 1000 ms       30 points
+1000-2000 ms     linear 30 to 24
+2000-3500 ms     linear 24 to 12
+3500-5000 ms     linear 12 to 3.6
+> 5000 ms        0 points
+```
+
+The goal is a useful final roughly two seconds after the user stops. This is not
+about producing text early while the user is still speaking.
+
+### Caps and failures
+
+| Final result | Effect |
+|---|---:|
+| Any timed run drops or hangs | that clip scores 0 |
+| Blank final | that clip scores 0 |
+| Repetition loop in final | cap 30 |
+| Final unrelated to audio | cap 20 |
+| Critical fact flip | cap 50 |
+| Median final latency over 4 seconds | cap 70 |
+| Median final latency over 6 seconds | cap 50 |
+| Non-loopback network call | evaluation fails |
+
+Intermediate drafts never affect these caps.
+
+## Evaluation harness
+
+For each clip, the official evaluator:
+
+1. Feeds audio at 1x real time in 20 ms frames.
+2. Measures the final received after `end` on its own monotonic clock.
+3. Repeats five times with small deterministic gain and resampling changes to
+   prevent audio fingerprint lookup.
+4. Discards and repeats a run if the harness itself failed to feed audio at the
+   correct pace. This validates the evaluator and is not an entrant metric.
+5. Scores final quality on the median-latency run and latency on the five-run
+   median.
+
+The official run uses a pinned MacBook Pro 14-inch (2021), Apple M1 Pro, 32 GB
+RAM, with acceleration available and outbound network blocked after warmup.
+
+## RambleFix benchmark and corpus rule
+
+RambleFix and every entrant must run through the same evaluator on the **same hidden corpus**
+and frozen machine. The official manifest is
+`data/hidden/manifest.json`: 96 rows covering English, Hindi, mixed Hindi-English,
+and longer English speech. If that corpus or scoring contract changes, RambleFix
+must be rescored from saved compatible captures or rerun before a prize decision.
+
+RambleFix is useful but not the target ceiling: its faithful final has historically
+been slower than the roughly two-second product goal. A winning submission needs
+to preserve mixed-language meaning and produce its final faster.
+
+Any older result measured on a smaller corpus is a **component check**, **not the final payout line**.
+
+## Run locally
 
 ```bash
 pip install -r requirements.txt -r requirements-streaming.txt
 python preview_stream.py
+pytest tests/test_streaming_scorecard.py
+pytest tests/test_stream_contract.py
 ```
-
----
-
-## 2. Wire protocol (sealed harness — for reference only)
-
-One loopback WebSocket per clip. Server prints `READY port=<PORT>` on warm; the
-harness blocks on that line.
-
-**Evaluator → solution:**
-```jsonc
-{"type":"start","sample_rate":16000,"format":"pcm_s16le","channels":1,"clip_id":"<opaque>"}
-// audio: raw BINARY ws frames, 20ms each (640 bytes PCM s16le @16kHz), in order.
-//        Binary is the ONLY audio path.
-{"type":"end"}
-```
-**Solution → evaluator:**
-```jsonc
-{"type":"partial","text":"rollback abhi mat","stable_chars":11}  // zero or more, during audio
-{"type":"final","text":"rollback abhi mat karo, pehle p95 check karlo"}  // exactly one, after end
-{"type":"meta","model_ids":["..."],"local_only":true}            // optional, unscored audit
-```
-
-There is **no `t_ms`, no `seq`, no `pcm_b64`**. Every scored timing is the
-evaluator's own monotonic **receive** clock — you cannot self-report latency.
-
----
-
-## 3. Scoring — one combined score, 100 points
-
-| Metric | Weight | Definition |
-|---|---:|---|
-| Final meaning / fidelity | 40 | `judge_meaning(gold, final)` (reused from `scorecard.py`) — on the Hindi-English mix |
-| Critical facts & terms | 20 | `critical_flip(gold, final, must_have)` (reused) — numbers / "not" / names / required terms |
-| End-to-final latency | 25 | median over 5 runs of `final_recv − last_audio_sent` |
-| Stable-partial latency (TTFS) | 5 | median over 5 runs of time to the first *useful committed* partial |
-| Revision churn | 5 | `5 · (1 − min(1, revision_churn))` |
-| Streaming reliability | 5 | no blank final / no loop / no drop / no hang across all 5 runs |
-
-Roughly: **~60% accuracy + Hindi-English-mix correctness** (meaning + facts),
-**~35% live dictation feel** (end-to-final is the main latency axis, plus TTFS
-and churn), **~5% reliability**.
-
-**Quality (meaning + facts) is judged ONCE**, on the final of the
-**median-latency run** (the run whose end-to-final equals the median). Only the
-latency axes (end-to-final, TTFS) use the 5-run median.
-
-The implementation in [`streaming_scorecard.py`](../streaming_scorecard.py) **is**
-this spec — it reuses all quality logic from `scorecard.py` and adds only the
-streaming machinery (churn, TTFS usefulness, latency curves, caps).
-
-### 3.1 Latency → points (pre-registered independent of RambleFix)
-
-**The goal:** come close to Wispr Flow's *feel* — a good final within **~2 seconds** of you
-stopping. ~2s sits inside Wispr's real-world felt latency (1–2s) but is achievable locally and
-offline; an older RambleFix OpenSLR component check landed around ~4.3s, so ~2s is a real,
-meaningful cut, not a vanity bar. We do NOT claim Wispr's ~700ms cloud lab number — sub-1s is the
-stretch ceiling, not the bar.
-
-End-to-final (25 pts):
-```
-<= 1000ms        -> 25   (Wispr-class stretch ceiling)
-1000–2000ms      -> linear 25 → 20   (~2s = the realistic target: strong score)
-2000–3500ms      -> linear 20 → 10   (the older RambleFix OpenSLR check landed just past here)
-3500–5000ms      -> linear 10 → 3
-> 5000ms         -> 0
-```
-TTFS (5 pts): `<=1000ms → 5`; `1000–2500ms → linear 5→2`; `>2500ms or undefined → 0`.
-Churn (5 pts): `5 · (1 − min(1, revision_churn))`.
-
-These knees were committed **before** RambleFix's streaming numbers were
-computed (pre-registration; see §6).
-
-### 3.2 Revision churn (length-stable)
-
-Committed tokens are `normalize(text[:stable_chars])` — the **same tokenizer** as
-the batch scorecard, so casing never counts as a change. Churn counts committed
-tokens that were later dropped/changed (including those that didn't survive into
-the final), **normalized by total committed tokens emitted** (not by final
-length). A long "ramble" clip and a short clip with identical absolute thrash get
-the same churn — you can't dilute it with a long final. A solution that never
-commits (`stable_chars:0` always) gets churn 0.0 but earns 0 TTFS and trips the
-no-useful-partial cap — silence is not a dodge.
-
-### 3.3 TTFS "useful" partial
-
-A committed prefix `C = normalize(text[:stable_chars])` is **useful** when
-`len(C) >= 3` tokens **and** the token edit distance between `C` and the matching
-gold prefix is `<= 1`. Junk early commits (`"the"`, `stable_chars:0`) are not
-useful — they neither satisfy TTFS nor dodge the no-useful-partial cap. TTFS is
-the receive time of the first useful partial minus the run's audio-start; median
-over the 5 runs. If a run has no useful partial, its TTFS is undefined; if ≥ half
-the runs are undefined, the metric is 0 and the cap fires.
-
-### 3.4 Hard caps (per clip; clip score = `min(base, cap)`, most-severe wins)
-
-| Condition | Cap |
-|---|---:|
-| No partial before `end` (any run) | 70 |
-| No useful committed partial ever (TTFS undefined on ≥ half the runs) | 70 |
-| Median end-to-final > 4000ms (well past the 2s target) | 80 |
-| Median end-to-final > 6000ms | 50 |
-| Critical fact flip on the final | 50 |
-| Blank final / repetition loop / WER > 0.9 | 20 / 30 / 20 (reused from `scorecard.py`) |
-| `revision_churn > 0.5` | 60 |
-| Connection drop / hang on a timed clip | that clip = 0 |
-| Non-loopback socket during the timed run | FAIL (`offline_guard`) |
-
-Run score = mean over clips.
-
----
-
-## 4. The harness (how you're fed)
-
-[`evaluator.py`](../evaluator.py) launches your sealed server on a free loopback
-port, warms up on one unscored clip, calls `block_network()` (cloud blocked;
-loopback stays open), then per clip:
-
-1. Feeds the WAV at **1x real time** as 20ms binary PCM frames, absolute-time
-   paced so jitter never accumulates.
-2. Captures partial/final events on a monotonic receive clock.
-3. Repeats **5 times** with **per-run anti-replay jitter** (±0.5 dB gain, ±0.3%
-   resample, deterministic per (clip, run)) — defeats fingerprint memoization
-   across the 5 warm serial runs without changing the words.
-4. **Pace-sanity floor:** total send time must be within ±5% of the clip
-   duration; an out-of-band run is discarded and re-run, never scored.
-5. Latency/TTFS = 5-run median; quality = the median-latency run's final.
-
-There is **no partial-causality / foreknowledge detector** — buffering is already
-non-profitable (audio arrives only at 1x; end-to-final is measured from the last
-frame), and "batch in costume" is handled by the 70 cap, not a detector.
-
----
-
-## 5. Frozen box (pre-registered)
-
-The official run is on a **single frozen machine** — every entry (and the RambleFix
-benchmark line) is timed on the same box under identical conditions, so speed is
-about the code, not whose laptop is faster. It is a **representative work laptop**:
-because the goal is a good final within ~2s (Wispr-class *feel*, locally), the
-machine's on-device accelerator (GPU / Apple Neural Engine) is available to the
-scored process — outbound **network is blocked** after model warmup. The exact
-machine is pinned here at launch and does not change for the round:
-
-> **Frozen box (pinned):** MacBook Pro 14-inch (2021) · Apple M1 Pro · 8-core CPU
-> (6P + 2E) + GPU + 16-core Neural Engine · 32 GB RAM · macOS Tahoe 26.3.1 ·
-> accelerator on, **network blocked** after model warmup. The §3.1 latency knees are
-> calibrated to this machine.
-
----
-
-## 6. RambleFix — benchmark line and corpus rule
-
-RambleFix is the engine you're trying to beat. It is a **benchmark line only** and
-is **ineligible for the $500**. Its streaming shape: a warm local `whisper.cpp`
-small server drafts the rolling audio prefix, commits the stable common
-word-prefix, pastes the latest draft immediately at key-up, and an async
-code-switch-faithful Hinglish finalizer replaces the final when it lands. The
-clean wrapper that runs it through this exact public harness is
-[`baseline/ramblefix_stream.py`](../baseline/ramblefix_stream.py).
-
-**Hard corpus rule:** the official RambleFix qualifier line and every entrant must be
-scored on the **same hidden corpus** with the same `evaluator.py`,
-`streaming_scorecard.py`, pinned machine, warmup, and network block. The current
-official scoring manifest is `data/hidden/manifest.json` (96 rows: 20 FLEURS
-English, 20 FLEURS Hindi, 40 OpenSLR-104 Hindi+English, 16 YouTube English). If
-that manifest changes, the RambleFix line must be rerun before any prize decision.
-
-The numbers below are a **component check**, not the final payout line unless the
-official hidden manifest is exactly the same set. They were measured on the pinned
-frozen box (MacBook Pro 14-inch 2021, Apple M1 Pro, 32 GB, macOS Tahoe 26.3.1),
-real-time WAV feeds, network off, over **25 OpenSLR-104 Hindi+English clips**
-(2026-06-21). The §3.1 curve knees were committed **before** these were computed
-(pre-registration).
-
-| Axis | RambleFix (measured) | Notes |
-|---|---|---|
-| Release-to-paste (latest rough draft) | **p50 50ms · p95 1.2s** | a rough draft pastes ~instantly after key-up |
-| Release-to-final (faithful Hinglish final) | **p50 4.3s · p95 7.4s** | the async finalizer — **well above the 2s target**; the main thing to beat |
-| Time-to-first-partial | **p50 2.0s** | first *useful* draft is still too late |
-| Hindi-English mix (final) | WER **0.21** · meaning **0.76** · terms **0.97** | keeps the actual words; cloud/free tools translate the mix away |
-
-This shows the likely weak spot: RambleFix's faithful final was ~4.3s p50 on the
-OpenSLR slice, above the 2s target, and its first useful partial was ~2s. To
-qualify for payout, beat the RambleFix rerun on the same hidden corpus used for
-entrants while keeping the mix faithful.
-
-> **Order constraint (pre-registration proof):** the §3.1 curve knees are finalized
-> and committed first; RambleFix's streaming numbers are computed and published
-> second, in the same release.

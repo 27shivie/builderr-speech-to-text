@@ -13,20 +13,18 @@ s16le, mono, 16kHz (little-endian int16). Return:
                   Hindi-English code-switch faithful — write what was actually
                   said, don't translate the mix into English (the scorecard caps
                   that). On is_final=True, return your best full transcript.
-  - stable_chars: length of the leading prefix of text_so_far you COMMIT to —
-                  you promise never to rewrite it. Must be non-decreasing across
-                  calls. Rewriting committed text counts as revision churn.
+  - stable_chars: optional UX metadata for partial display. It is not scored.
 
 Tips that match how the reference engine (RambleFix) does it:
   - Re-decode the rolling prefix; commit the longest common prefix with your
     previous draft (that part has stopped changing — safe to lock).
   - Don't translate to chase a meaning score; it kills faithfulness and is capped.
-  - Be fast on the first useful partial (TTFS is scored) and on the final
-    (end-to-final is the main latency axis).
+  - Spend effort on the final transcript and how quickly it arrives after the
+    user stops. Partial timing and rewrites are not scored.
   - Never return a blank, a loop, or hang — degrade to your best partial instead.
 
 This reference body wraps a local faster-whisper draft on the rolling buffer and
-commits the stable common prefix. If faster-whisper isn't installed it returns an
+can emit a stable common prefix for preview UX. If faster-whisper isn't installed it returns an
 empty draft (clearly a non-winning placeholder) so the contract still validates.
 Replace the body with your own router + Hindi-capable model + finalizer.
 """

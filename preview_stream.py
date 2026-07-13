@@ -24,13 +24,13 @@ def main():
     res = asyncio.run(_evaluate(manifest, "solution.stream_server", runs=5,
                                 enforce_offline=True))
     print(f"\n  streaming score   {res['overall_score']}/100")
-    print(f"  meaning {res['meaning_mean']}   WER {res['wer_mean']}   churn {res['churn_mean']}")
-    print(f"  median end-to-final {res['median_end_to_final_ms']}ms   median TTFS {res['median_ttfs_ms']}ms")
-    print(f"  reliability-ok {res['reliability_ok_rate']}   clips capped {res['clips_capped']}/{res['n']}")
+    print(f"  meaning {res['meaning_mean']}   WER {res['wer_mean']}")
+    print(f"  median end-to-final {res['median_end_to_final_ms']}ms")
+    print(f"  final-ok {res['final_ok_rate']}   clips capped {res['clips_capped']}/{res['n']}")
     for c in res["clips"]:
         flag = f"  capped@{c['capped_at']}" if c["capped_at"] else ""
-        print(f"    {c['clip_id'][:28]:28s} score {c['score']:6}  e2f {c['median_end_to_final_ms']}ms"
-              f"  ttfs {c['median_ttfs_ms']}ms{flag}  {';'.join(c['reasons'][:2])}")
+        print(f"    {c['clip_id'][:28]:28s} score {c['score']:6}  final {c['median_end_to_final_ms']}ms"
+              f"{flag}  {';'.join(c['reasons'][:2])}")
     print("\n  (sample numbers are illustrative; the hidden set + your latency on the "
           "frozen CPU box rank you. The starter draft() scores low — that's your start line.)")
 

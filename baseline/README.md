@@ -81,10 +81,8 @@ gaps, ranked by how winnable they are:
    work — a smaller/quantized faithful model, mlx instead of torch, keeping it resident
    and warm, and overlapping decode with the stream instead of waiting for key-up.
 
-2. **The pre-final window shows translated text.** Until the faithful final lands, the
-   user sees the fast draft — which translates the mix to English (see the table
-   above). If your final is late, that's what they read. Committing a *faithful* partial
-   early beats this.
+2. **The finalizer sometimes translates the mix.** Keep the final faithful to the
+   actual Hindi-English wording instead of converting it to English.
 
 3. **Hindi-heavy and fast code-switching clips are the risk.** That is where the
    hidden-set rerun matters most; do not infer the official score from only the

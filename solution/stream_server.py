@@ -19,9 +19,9 @@ Wire protocol (loopback WebSocket, one connection per clip):
 
 On warm + accepting it prints exactly `READY port=<PORT>` to stdout; the harness
 blocks on that line. There is NO t_ms / seq / pcm_b64 — all timing is the
-evaluator's receive clock. `stable_chars` is the length of the leading prefix of
-`text` you promise never to rewrite (must be non-decreasing; the committed prefix
-may only be extended). Rewriting committed text is counted as churn.
+evaluator's receive clock. Partial messages and `stable_chars` are optional UI
+hints and are not scored. Only the final transcript and its receive time after
+`end` count.
 
 Run:  python -m solution.stream_server --host 127.0.0.1 --port <PORT>
 """

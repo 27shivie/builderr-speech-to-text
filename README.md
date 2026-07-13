@@ -82,16 +82,15 @@ Modes: `auto` / `fast` / `hinglish` / `verbatim`.
 ## The streaming dictation track — where the $500 is
 
 There's one prize, **$500**, on one combined score, decided on **live dictation**:
-your tool has to draft text *as you speak* and finalize fast, not just transcribe a
-finished clip. You write **one function** — `draft()` in
-[`solution/draft.py`](solution/draft.py) — that emits text as audio arrives and
-commits what won't change. The streaming server and the real-time audio feed are a
+the final text must preserve what the speaker meant and arrive quickly after they
+stop. You write **one function** — `draft()` in
+[`solution/draft.py`](solution/draft.py). The streaming server and real-time audio feed are a
 **sealed harness we provide** ([`solution/stream_server.py`](solution/stream_server.py)) —
 you do not build a server.
 
-You're scored on one combined number: meaning + Hindi-English-mix correctness on
-the final, plus live feel (how fast the final lands after you stop, time to the
-first useful partial, and whether committed text gets rewritten), plus reliability.
+You're scored on one combined number: **final transcript correctness (70 points)**
+and **time from stopping to the final paste (30 points)**. Intermediate drafts are
+optional and never affect the score.
 **RambleFix is the benchmark line to beat — it can't win the prize.**
 
 The full contract, scoring, caps, frozen-CPU bar, and RambleFix's published numbers
@@ -143,6 +142,6 @@ on a Linux box, and you land on the board.
 ```bash
 python tests/test_scorecard.py            # batch scoring is fair + un-gameable
 python tests/test_no_network.py           # offline enforcement works
-pytest tests/test_streaming_scorecard.py  # streaming scoring: churn / TTFS / latency caps
+pytest tests/test_streaming_scorecard.py  # final transcript + final latency scoring
 pytest tests/test_stream_contract.py      # the sealed streaming server speaks the contract
 ```

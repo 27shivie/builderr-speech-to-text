@@ -53,11 +53,11 @@ keeps it faithful without hanging or repeating. You don't have to copy it — bu
 
 ## 4b. The streaming track — where the $500 is decided
 
-The prize is decided on **live dictation**: drafting text *as you speak* and finalizing fast, not
-just transcribing a finished clip. You write **one more function** — `draft()` in
-[`solution/draft.py`](solution/draft.py) — that emits text as audio arrives and commits what won't
-change. The server and the real-time audio feed are a **sealed harness we provide**; you do not
-build a server.
+The prize is decided on **live dictation**: when the speaker stops, the final text should preserve
+what they meant and be ready to paste quickly. You write **one more function** — `draft()` in
+[`solution/draft.py`](solution/draft.py). The server and real-time audio feed are a **sealed harness
+we provide**; you do not build a server. Only the final transcript and its end-to-final latency are
+scored. Intermediate drafts are optional and unscored.
 
 ```bash
 pip install -r requirements.txt -r requirements-streaming.txt

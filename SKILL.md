@@ -39,9 +39,8 @@ Throughout, keep the raw candidates + timings + which model ran (auditability is
 
 ## The streaming track (where the $500 is)
 The prize is decided on **live dictation**, not batch transcription. The same pipeline shape —
-fast draft on the rolling audio, router, Hinglish-capable escalation, faithful finalizer — *is*
-the streaming track, just emitted incrementally: draft text **as audio arrives**, commit what
-won't change, finalize fast after the user stops. You implement **one function**, `draft()` in
+router, Hinglish-capable escalation, and faithful finalizer — is the streaming track. The scored
+result is the final transcript available after the user stops and how long that final takes. You implement **one function**, `draft()` in
 [`solution/draft.py`](solution/draft.py); the streaming server and real-time feed are a sealed
 harness we provide (you don't build a server). Full contract, scoring, caps, and the RambleFix
 benchmark line live in [`docs/STREAMING_CONTRACT.md`](docs/STREAMING_CONTRACT.md) — read it, don't
@@ -54,9 +53,8 @@ to score yourself on the **sample clips in `samples/`**, offline. Submit the rep
 `submit@builderr.ai`.
 
 ## 🔒 Hard Learnings
-- **TTFS / end-to-final latency / streaming-compliance are gates and caps, never standalone
-  weighted prizes.** They fold into the ONE combined streaming score (~35% live feel) and into the
-  hard caps — do not reintroduce them as separate scored weights or a second prize.
+- **Never score partials, time-to-first-partial, or revision churn.** Intermediate drafts are
+  optional UX. The score is final transcript correctness (70) plus end-to-final paste latency (30).
 - **One prize, one combined score.** No "Best on the Mix" second award. The mix is the heart of the
   ~60% accuracy weight, not a separate track.
 - **Never translate the mix to win meaning** — it's capped. Keep the code-switch faithful.
