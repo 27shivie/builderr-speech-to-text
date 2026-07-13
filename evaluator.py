@@ -24,13 +24,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import select
 import socket
 import subprocess
 import sys
+import threading
 import time
 import wave
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -46,6 +50,8 @@ except Exception:  # pragma: no cover
 FRAME_MS = 20
 SR = 16000
 FRAME_BYTES = int(SR * FRAME_MS / 1000) * 2  # 20ms s16le mono = 640 bytes
+DEFAULT_WARMUP_WAV = os.path.join(HERE, "samples", "fleurs_en_us_test_1904.wav")
+SANDBOX_EXEC = "/usr/bin/sandbox-exec"
 
 
 # --------------------------------------------------------------------------
@@ -94,6 +100,16 @@ def _jitter(pcm: bytes, seed: int) -> bytes:
         a16 = np.clip(a, -32768, 32767).astype(np.int16)
         a = _resample(a16, SR, int(round(SR / speed))).astype(np.float32)
     return np.clip(a, -32768, 32767).astype(np.int16).tobytes()
+
+
+def _jitter_seed(clip_id: str, attempt: int) -> int:
+    """Stable across Python processes and machines for reproducible reruns."""
+    payload = f"builderr-stt-v2\0{clip_id}\0{attempt}".encode("utf-8")
+    return int.from_bytes(hashlib.sha256(payload).digest()[:4], "big")
+
+
+def _wire_clip_id(clip_id: str, secret: bytes) -> str:
+    return hashlib.blake2s(clip_id.encode("utf-8"), key=secret, digest_size=12).hexdigest()
 
 
 def _frames(pcm: bytes):
@@ -175,22 +191,27 @@ async def _run_once(uri: str, clip_id: str, pcm: bytes) -> dict:
     }
 
 
-async def _capture_clip(uri: str, clip: dict, runs: int) -> dict:
+async def _capture_clip(uri: str, clip: dict, runs: int, wire_secret: bytes) -> dict:
     pcm = _read_pcm_16k_mono(clip["_wav"])
     captured = []
     attempt_seed = 0
+    wire_id = _wire_clip_id(clip["clip_id"], wire_secret)
     while len(captured) < runs and attempt_seed < runs * 4:
-        seed = hash((clip["clip_id"], attempt_seed)) & 0xFFFFFFFF
+        seed = _jitter_seed(clip["clip_id"], attempt_seed)
         attempt_seed += 1
-        run = await _run_once(uri, clip["clip_id"], _jitter(pcm, seed))
+        run = await _run_once(uri, wire_id, _jitter(pcm, seed))
         # pace sanity: an out-of-band run is discarded and re-run, never scored
         if not run.get("pace_ok", True) and not run.get("dropped"):
             continue
         captured.append(run)
     return {
-        "clip_id": clip["clip_id"],
+        # Never put source-dataset IDs in result artifacts. They can be enough to
+        # recover public-corpus references even when the gold text itself is absent.
+        "clip_id": wire_id,
         "gold": clip.get("gold", ""),
+        "gold_alternatives": clip.get("gold_alternatives", []),
         "must_have": clip.get("must_have", []),
+        "category": clip.get("category", ""),
         "runs": captured,
     }
 
@@ -207,46 +228,161 @@ def _free_port() -> int:
     return port
 
 
-def _start_server(module: str, port: int) -> subprocess.Popen:
+def _sandbox_profile(deny_read_roots: list[str]) -> str:
+    rules = [
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        '(allow network-outbound (remote ip "localhost:*"))',
+        '(allow network-inbound (local ip "localhost:*"))',
+    ]
+    for root in sorted({str(Path(value).expanduser().resolve()) for value in deny_read_roots if value}):
+        rules.append(f"(deny file-read* (subpath {json.dumps(root)}))")
+    return "".join(rules)
+
+
+def _drain_server_output(stream, log_path: str, initial_lines: list[str]) -> None:
+    with open(log_path, "w", encoding="utf-8") as log:
+        log.writelines(initial_lines)
+        log.flush()
+        for line in iter(stream.readline, ""):
+            log.write(line)
+            log.flush()
+
+
+def _start_server(module: str, port: int, *, enforce_offline: bool,
+                  deny_read_roots: list[str], server_log: str) -> subprocess.Popen:
+    command = [sys.executable, "-m", module, "--host", "127.0.0.1", "--port", str(port)]
+    if enforce_offline:
+        if sys.platform != "darwin" or not os.path.exists(SANDBOX_EXEC):
+            raise RuntimeError("official scoring requires macOS sandbox-exec process isolation")
+        command = [SANDBOX_EXEC, "-p", _sandbox_profile(deny_read_roots), *command]
+
+    env = os.environ.copy()
+    if enforce_offline:
+        env.update({
+            "HF_HUB_OFFLINE": "1",
+            "TRANSFORMERS_OFFLINE": "1",
+            "HF_DATASETS_OFFLINE": "1",
+            "NO_PROXY": "127.0.0.1,localhost",
+            "no_proxy": "127.0.0.1,localhost",
+        })
     proc = subprocess.Popen(
-        [sys.executable, "-m", module, "--host", "127.0.0.1", "--port", str(port)],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=HERE, text=True)
-    # block on the READY line
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=HERE,
+        env=env, text=True, bufsize=1)
+    assert proc.stdout is not None
+
+    # Wait without blocking forever when the child never emits a newline.
     deadline = time.monotonic() + 60
+    initial_lines: list[str] = []
     while time.monotonic() < deadline:
+        if proc.poll() is not None:
+            tail = "".join(initial_lines)[-4000:]
+            raise RuntimeError(f"stream server exited before READY\n{tail}")
+        ready, _, _ = select.select([proc.stdout], [], [], 0.25)
+        if not ready:
+            continue
         line = proc.stdout.readline()
         if not line:
-            if proc.poll() is not None:
-                raise RuntimeError("stream server exited before READY")
             continue
+        initial_lines.append(line)
         if line.startswith(f"READY port={port}"):
+            Path(server_log).parent.mkdir(parents=True, exist_ok=True)
+            thread = threading.Thread(
+                target=_drain_server_output,
+                args=(proc.stdout, server_log, initial_lines),
+                name="builderr-stt-server-log",
+                daemon=True,
+            )
+            thread.start()
             return proc
-    raise RuntimeError("stream server did not print READY in time")
+    proc.terminate()
+    raise RuntimeError("stream server did not print READY within 60 seconds")
+
+
+def _resolve_audio(clip: dict, manifest_path: str) -> str:
+    base = Path(manifest_path).expanduser().resolve().parent
+    candidates: list[Path] = []
+    for value in (clip.get("audio_local"), clip.get("audio")):
+        if not value:
+            continue
+        path = Path(str(value)).expanduser()
+        candidates.append(path if path.is_absolute() else base / path)
+        candidates.append(Path(HERE) / path)
+    candidates.extend([
+        base / "audio" / f"{clip['clip_id']}.wav",
+        base / f"{clip['clip_id']}.wav",
+    ])
+    for candidate in candidates:
+        resolved = candidate.resolve()
+        if resolved.is_file():
+            return str(resolved)
+    searched = "\n".join(f"  - {candidate.resolve()}" for candidate in candidates)
+    raise FileNotFoundError(f"missing audio for {clip['clip_id']}; searched:\n{searched}")
+
+
+def _select_manifest(manifest: list[dict], *, limit: int = 0,
+                     per_category: int = 0) -> list[dict]:
+    if limit and per_category:
+        raise ValueError("use either --limit or --per-category, not both")
+    if limit:
+        return manifest[:limit]
+    if not per_category:
+        return manifest
+    counts: dict[str, int] = {}
+    selected = []
+    for row in manifest:
+        category = str(row.get("category") or "unknown")
+        if counts.get(category, 0) >= per_category:
+            continue
+        selected.append(row)
+        counts[category] = counts.get(category, 0) + 1
+    return selected
 
 
 async def _evaluate(manifest_path: str, server_module: str, runs: int,
-                    enforce_offline: bool) -> dict:
+                    enforce_offline: bool, warmup_wav: str,
+                    deny_read_roots: list[str], server_log: str,
+                    limit: int = 0, per_category: int = 0) -> dict:
     manifest = json.load(open(manifest_path))
-    base = os.path.dirname(os.path.abspath(manifest_path))
+    manifest = _select_manifest(manifest, limit=limit, per_category=per_category)
     for c in manifest:
-        wav = c.get("audio_local") or os.path.join(base, os.path.basename(c.get("audio", c["clip_id"] + ".wav")))
-        if not os.path.exists(wav):
-            wav = os.path.join(base, c["clip_id"] + ".wav")
-        c["_wav"] = wav
+        c["_wav"] = _resolve_audio(c, manifest_path)
+
+    warmup_path = str(Path(warmup_wav).expanduser().resolve())
+    if not os.path.isfile(warmup_path):
+        raise FileNotFoundError(f"missing dedicated warmup WAV: {warmup_path}")
 
     port = _free_port()
-    proc = _start_server(server_module, port)
+    private_roots = [str(Path(manifest_path).expanduser().resolve().parent), *deny_read_roots]
+    proc = _start_server(
+        server_module, port, enforce_offline=enforce_offline,
+        deny_read_roots=private_roots, server_log=server_log)
     uri = f"ws://127.0.0.1:{port}"
     try:
-        # warm-up on the first clip (unscored), then go offline
-        warm = _read_pcm_16k_mono(manifest[0]["_wav"])
+        # Warm on a dedicated public clip, never on hidden scored audio.
+        warm = _read_pcm_16k_mono(warmup_path)
         await _run_once(uri, "__warmup__", warm)
         if enforce_offline:
-            block_network()  # loopback stays open; cloud is blocked from here on
+            block_network()  # defense-in-depth for the evaluator process itself
 
-        clips = [await _capture_clip(uri, c, runs) for c in manifest]
-        return score_stream_run(clips)
+        wire_secret = os.urandom(32)
+        clips = [await _capture_clip(uri, c, runs, wire_secret) for c in manifest]
+        result = score_stream_run(clips)
+        result["harness"] = {
+            "version": "builderr-stt-v2",
+            "process_network_isolation": enforce_offline,
+            "sealed_server": server_module == "solution.stream_server",
+            "dedicated_warmup": warmup_path,
+            "opaque_wire_ids": True,
+            "stable_jitter": True,
+            "server_log": str(Path(server_log).resolve()),
+        }
+        return result
     finally:
+        if enforce_offline:
+            from offline_guard import restore_network
+            restore_network()
         proc.terminate()
         try:
             proc.wait(timeout=5)
@@ -259,13 +395,31 @@ def main():
     ap.add_argument("--manifest", default=os.path.join(HERE, "samples/manifest.json"))
     ap.add_argument("--server-module", default="solution.stream_server")
     ap.add_argument("--runs", type=int, default=5)
+    ap.add_argument("--limit", type=int, default=0, help="dev/smoke only; official run uses all rows")
+    ap.add_argument("--per-category", type=int, default=0,
+                    help="balanced dev/screening slice only; official run uses all rows")
     ap.add_argument("--no-offline", action="store_true",
                     help="skip block_network() (dev only; official run always enforces)")
+    ap.add_argument("--warmup-wav", default=DEFAULT_WARMUP_WAV,
+                    help="dedicated public, unscored warmup WAV; never use hidden audio")
+    ap.add_argument("--deny-read-root", action="append", default=[],
+                    help="additional path hidden from the entrant server; repeatable")
+    ap.add_argument("--server-log", default=os.path.join(HERE, "server.log"))
+    ap.add_argument("--output-json", help="private result artifact path")
     ap.add_argument("--json", action="store_true", help="dump full JSON result")
     args = ap.parse_args()
 
     res = asyncio.run(_evaluate(args.manifest, args.server_module, args.runs,
-                                enforce_offline=not args.no_offline))
+                                enforce_offline=not args.no_offline,
+                                warmup_wav=args.warmup_wav,
+                                deny_read_roots=args.deny_read_root,
+                                server_log=args.server_log,
+                                limit=args.limit,
+                                per_category=args.per_category))
+    if args.output_json:
+        output_path = Path(args.output_json).expanduser().resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(res, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     if args.json:
         print(json.dumps(res, indent=2, ensure_ascii=False))
         return

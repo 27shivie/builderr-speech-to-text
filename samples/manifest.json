@@ -51,6 +51,9 @@
     "clip_id": "openslr104_hi_en_103085_w5Jyq3XMbb3WwiKQ_0000",
     "audio": "samples/openslr104_hi_en_103085_w5Jyq3XMbb3WwiKQ_0000.wav",
     "gold": "लिबर ऑफिस impress में एक प्रस्तुति document बनाना और बुनियादी formatting के इस spoken tutorial में आपका स्वागत है",
+    "gold_alternatives": [
+      "libre office impress mein ek prastuti document banana aur buniyadi formatting ke is spoken tutorial mein aapka swagat hai"
+    ],
     "must_have": [
       "impress",
       "document",
@@ -65,6 +68,9 @@
     "clip_id": "openslr104_hi_en_103085_w5Jyq3XMbb3WwiKQ_0001",
     "audio": "samples/openslr104_hi_en_103085_w5Jyq3XMbb3WwiKQ_0001.wav",
     "gold": "इस tutorial में हम impress window के भागों के बारे में सीखेंगे और कैसे स्लाइड इन्सर्ट करें और कॉपी करें फॉन्ट तथा फॉन्ट को फॉर्मेट करना सीखेंगे",
+    "gold_alternatives": [
+      "is tutorial mein hum impress window ke bhaagon ke baare mein seekhenge aur kaise slide insert karein aur copy karein font tatha font ko format karna seekhenge"
+    ],
     "must_have": [
       "tutorial",
       "impress"
@@ -77,6 +83,9 @@
     "clip_id": "openslr104_hi_en_103085_w5Jyq3XMbb3WwiKQ_0002",
     "audio": "samples/openslr104_hi_en_103085_w5Jyq3XMbb3WwiKQ_0002.wav",
     "gold": "यहाँ हम अपने ऑपरेटिंग सिस्टम के रूप में gnu/linux और लिबरऑफिस वर्जन 334 का उपयोग कर रहे हैं",
+    "gold_alternatives": [
+      "yahan hum apne operating system ke roop mein gnu linux aur libreoffice version 334 ka upyog kar rahe hain"
+    ],
     "must_have": [],
     "language": "hi-en",
     "category": "openslr104_hinglish",

@@ -1,7 +1,15 @@
 """Proves the scoring engine is fair and hard to game. Run: python tests/test_scorecard.py"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from scorecard import score_clip, wer, critical_flip, has_repetition_loop
+from scorecard import (
+    critical_flip,
+    has_repetition_loop,
+    normalize,
+    phonetic_token_f1,
+    phonetic_wer,
+    score_clip,
+    wer,
+)
 
 GOLD = "Tell Cursor to update the PRD but do not change the June 24 deadline."
 GOOD_AUDIT = {"model_ids": ["whisper.cpp-small"], "route": "fast"}
@@ -30,6 +38,8 @@ check(f"dropped negation capped at 50 ({r.score})", r.capped_at == 50.0)
 # 4. required term missing → flip
 flipped, reasons = critical_flip(GOLD, "Tell it to update the doc but keep the June 24 date.", ["Cursor", "PRD"])
 check("missing required term flagged", flipped)
+check("failure reasons do not leak hidden terms",
+      "Cursor" not in " ".join(reasons) and "PRD" not in " ".join(reasons))
 
 # 5. blank → capped at 20
 r = clip("")
@@ -48,5 +58,27 @@ check(f"unrelated capped at 20 ({r.score})", r.capped_at == 20.0)
 # 8. network/local violation → loses local points
 r = clip(GOLD, local=False)
 check(f"non-local loses 10 pts ({r.score})", r.score < 95 and "local_only flag false" in r.reasons)
+
+# 9. Devanagari is real transcript content, not a blank string
+HINDI = "यह एक सही हिंदी प्रतिलेख है"
+check("Unicode tokenizer preserves Devanagari", normalize(HINDI) == ["यह", "एक", "सही", "हिंदी", "प्रतिलेख", "है"])
+r = score_clip(HINDI, HINDI, [], T, True, GOOD_AUDIT, "hindi")
+check(f"correct Hindi transcript is not blank/capped ({r.score})", r.capped_at is None and r.score >= 95)
+
+# 10. Mechanical and natural Roman-Hindi spellings compare closely, unrelated text does not
+MECHANICAL_ROMAN = (
+    "is tutorial mein hama impress window ke bhagom ke bare mein sikhemge aur kaise "
+    "slaida insarta karem aur kopi karem phonta tatha phonta ko phormeta karna sikhemge"
+)
+NATURAL_ROMAN = (
+    "is tutorial mein ham impress window ke bhaagon ke baare mein sikhenge aur kaise "
+    "slide insert karen aur copy karen font tatha font ko format karna sikhenge"
+)
+check("Roman-Hindi spelling variants preserve high meaning",
+      phonetic_token_f1(MECHANICAL_ROMAN, NATURAL_ROMAN) >= 0.85)
+check("Roman-Hindi spelling variants keep word error below 0.30",
+      phonetic_wer(MECHANICAL_ROMAN, NATURAL_ROMAN) <= 0.30)
+check("unrelated English gets no phonetic shortcut",
+      phonetic_token_f1(MECHANICAL_ROMAN, "the weather forecast is sunny tomorrow") < 0.30)
 
 print("\nALL SCORECARD TESTS PASSED")

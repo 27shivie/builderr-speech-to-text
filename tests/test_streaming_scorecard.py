@@ -157,11 +157,43 @@ def test_caps():
     check(f"dropped run -> clip 0 ({r.score})", r.score == 0.0)
 
 
+def test_hindi_and_reference_alternatives():
+    hindi = "यह एक सही हिंदी प्रतिलेख है"
+    roman = "yeh ek sahi hindi pratilekh hai"
+
+    hindi_runs = [_good_run(800, hindi) for _ in range(5)]
+    for run in hindi_runs:
+        run["partials"] = [(0.5, "यह एक सही", len("यह एक सही"))]
+    result = score_stream_clip({"clip_id": "hi", "gold": hindi, "must_have": [], "runs": hindi_runs})
+    check(
+        f"correct Devanagari final is not blank/capped ({result.score})",
+        result.capped_at is None and result.meaning == 1.0,
+    )
+
+    roman_runs = [_good_run(800, roman) for _ in range(5)]
+    for run in roman_runs:
+        run["partials"] = [(0.5, "yeh ek sahi", len("yeh ek sahi"))]
+    result = score_stream_clip({
+        "clip_id": "hi-roman",
+        "gold": hindi,
+        "gold_alternatives": [roman],
+        "must_have": [],
+        "runs": roman_runs,
+    })
+    check(
+        f"declared Roman-Hindi gold alternative scores fairly ({result.score})",
+        result.capped_at is None and result.meaning == 1.0,
+    )
+    check("result records prediction, not private reference text",
+          result.final_text == roman and "reference" not in result.components)
+
+
 def _run_all():
     test_churn()
     test_ttfs_usefulness()
     test_latency_curves()
     test_caps()
+    test_hindi_and_reference_alternatives()
     print("\nALL STREAMING SCORECARD TESTS PASSED")
 
 

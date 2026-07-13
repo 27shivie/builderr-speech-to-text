@@ -31,6 +31,7 @@ import argparse
 import asyncio
 import json
 import sys
+import traceback
 
 try:
     import websockets
@@ -97,7 +98,14 @@ def _safe_draft(audio: bytes, is_final: bool):
     """Never let a buggy draft() crash the connection; clamp the contract."""
     try:
         out = draft(audio, is_final)
-    except Exception:  # noqa: BLE001 - reliability: degrade, don't drop
+    except Exception as exc:  # noqa: BLE001 - reliability: degrade, don't drop
+        phase = "final" if is_final else "partial"
+        sys.stderr.write(
+            f"DRAFT_ERROR phase={phase} audio_bytes={len(audio)} "
+            f"error={type(exc).__name__}: {exc}\n"
+        )
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         return ("", 0)
     if not isinstance(out, tuple) or len(out) != 2:
         return ("", 0)

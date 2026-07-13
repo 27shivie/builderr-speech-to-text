@@ -46,6 +46,9 @@ from scorecard import (
     has_repetition_loop,
     wer,
     normalize,
+    phonetic_token_equal,
+    phonetic_token_f1,
+    phonetic_wer,
     LATENCY_BAR_MS,  # shared 5s reliability bar (see scorecard.py)
 )
 
@@ -121,19 +124,40 @@ def revision_churn(partials: list[tuple[float, str, int]], final_text: str) -> f
 # TTFS — time to first *useful* committed partial (reuses normalize)
 # =========================================================================
 
-def _token_edit_distance(a: list[str], b: list[str]) -> int:
+def _token_edit_distance(a: list[str], b: list[str], *, phonetic: bool = False) -> int:
     if not a:
         return len(b)
     prev = list(range(len(b) + 1))
     for i, x in enumerate(a, 1):
         cur = [i]
         for j, y in enumerate(b, 1):
-            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+            equal = phonetic_token_equal(x, y) if phonetic else x == y
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (not equal)))
         prev = cur
     return prev[-1]
 
 
-def is_useful_partial(text: str, stable_chars: int, gold: str) -> bool:
+def _references(gold: str | list[str]) -> list[str]:
+    values = [gold] if isinstance(gold, str) else list(gold)
+    return list(dict.fromkeys(value for value in values if isinstance(value, str) and value.strip()))
+
+
+def _best_reference(gold: str | list[str], pred: str) -> tuple[str, int, float, float]:
+    refs = _references(gold)
+    if not refs:
+        return "", 0, 0.0, 1.0
+    candidates = []
+    for index, reference in enumerate(refs):
+        meaning = judge_meaning(reference, pred)
+        error = wer(reference, pred)
+        if index > 0:
+            meaning = max(meaning, phonetic_token_f1(reference, pred))
+            error = min(error, phonetic_wer(reference, pred))
+        candidates.append((reference, index, meaning, error))
+    return max(candidates, key=lambda item: (item[2], -item[3]))
+
+
+def is_useful_partial(text: str, stable_chars: int, gold: str | list[str]) -> bool:
     """A committed prefix is 'useful' when it is real, committed, and right:
       - >= 3 committed tokens, AND
       - token edit distance to the matching gold prefix is <= 1.
@@ -142,16 +166,18 @@ def is_useful_partial(text: str, stable_chars: int, gold: str) -> bool:
     committed = _committed_tokens(text, stable_chars)
     if len(committed) < 3:
         return False
-    gold_toks = normalize(gold)
-    n = min(len(committed), len(gold_toks)) if gold_toks else 0
-    ref = gold_toks[: len(committed)] if len(committed) <= len(gold_toks) else gold_toks
-    # if committed longer than gold by >1 it can't be within edit distance 1
-    if len(committed) > len(gold_toks) + 1:
-        return False
-    return _token_edit_distance(committed, ref) <= 1
+    for index, reference in enumerate(_references(gold)):
+        gold_toks = normalize(reference)
+        ref = gold_toks[: len(committed)] if len(committed) <= len(gold_toks) else gold_toks
+        # if committed longer than gold by >1 it can't be within edit distance 1
+        if len(committed) > len(gold_toks) + 1:
+            continue
+        if _token_edit_distance(committed, ref, phonetic=index > 0) <= 1:
+            return True
+    return False
 
 
-def first_useful_ttfs(run, gold: str) -> float | None:
+def first_useful_ttfs(run, gold: str | list[str]) -> float | None:
     """Receive-time of the first useful partial minus the run's audio start.
     Returns None (undefined) if no useful partial appeared in this run."""
     t_start = run.get("t_start")
@@ -229,6 +255,8 @@ class StreamClipResult:
     median_ttfs_ms: float | None = None
     churn: float = 0.0
     reliability_ok: bool = True
+    final_text: str = ""
+    reference_variant: int = 0
     components: dict = field(default_factory=dict)
 
 
@@ -248,13 +276,14 @@ def score_stream_clip(clip) -> StreamClipResult:
     """
     clip_id = clip.get("clip_id", "")
     gold = clip.get("gold", "")
+    refs = [gold, *(clip.get("gold_alternatives") or [])]
     must_have = clip.get("must_have") or []
     runs = clip.get("runs") or []
     reasons: list[str] = []
 
     # ---- per-run latency captures -------------------------------------
     e2f = [v for v in (end_to_final_ms(r) for r in runs) if v is not None]
-    ttfs_vals = [v for v in (first_useful_ttfs(r, gold) for r in runs) if v is not None]
+    ttfs_vals = [v for v in (first_useful_ttfs(r, refs) for r in runs) if v is not None]
     med_e2f = _median(e2f)
     med_ttfs = _median(ttfs_vals)
 
@@ -272,9 +301,8 @@ def score_stream_clip(clip) -> StreamClipResult:
     )
 
     # ---- quality (reused scorecard logic) -----------------------------
-    m = judge_meaning(gold, final_text)
-    w = wer(gold, final_text)
-    flipped, fr = critical_flip(gold, final_text, must_have)
+    score_reference, reference_variant, m, w = _best_reference(refs, final_text)
+    flipped, fr = critical_flip(score_reference, final_text, must_have)
     reasons += fr
 
     meaning_pts = W_MEANING * m
@@ -288,7 +316,7 @@ def score_stream_clip(clip) -> StreamClipResult:
     blank_final = not normalize(final_text)
     loop = has_repetition_loop(final_text)
     no_partial_any = any(not r.get("partials") for r in runs)
-    no_useful = (sum(1 for r in runs if first_useful_ttfs(r, gold) is None) >= max(1, (len(runs) + 1) // 2))
+    no_useful = (sum(1 for r in runs if first_useful_ttfs(r, refs) is None) >= max(1, (len(runs) + 1) // 2))
     reliability_ok = not (any_dropped or blank_final or loop or no_partial_any)
     rel_pts = W_RELIABILITY if reliability_ok else 0.0
     if any_dropped:
@@ -343,6 +371,8 @@ def score_stream_clip(clip) -> StreamClipResult:
         median_ttfs_ms=None if med_ttfs is None else round(med_ttfs, 1),
         churn=round(churn, 3),
         reliability_ok=reliability_ok,
+        final_text=final_text,
+        reference_variant=reference_variant,
         components={
             "meaning": round(meaning_pts, 2),
             "facts": round(facts_pts, 2),

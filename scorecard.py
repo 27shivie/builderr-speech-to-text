@@ -18,10 +18,13 @@ locked-prompt LLM judge (see judge_meaning()).
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 
-_WORD = re.compile(r"[a-z0-9']+")
-_NEG = {"no", "not", "n't", "never", "without", "dont", "don't", "cannot", "can't", "nahi", "mat"}
+_NEG = {
+    "no", "not", "n't", "never", "without", "dont", "don't", "cannot", "can't",
+    "nahi", "nahin", "mat", "नहीं", "नही", "मत", "बिना",
+}
 
 # Shared latency bar (ms): batch counts a clip as a hang past this; the streaming
 # track caps end-to-final past this. One bar, imported by streaming_scorecard.py.
@@ -29,7 +32,29 @@ LATENCY_BAR_MS = 5000
 
 
 def normalize(text: str) -> list[str]:
-    return _WORD.findall((text or "").lower())
+    """Unicode word tokenizer used by every quality and streaming metric.
+
+    The previous ASCII-only regex silently discarded all Devanagari. A correct
+    Hindi transcript therefore looked blank and every FLEURS-Hindi row was
+    mathematically capped at 20. Keep letters, numbers, and combining marks from
+    every script while preserving apostrophes inside words.
+    """
+    tokens: list[str] = []
+    current: list[str] = []
+    for char in unicodedata.normalize("NFKC", text or "").lower():
+        category = unicodedata.category(char)
+        if category[0] in {"L", "N"} or category[0] == "M":
+            current.append(char)
+            continue
+        if char in {"'", "’"} and current:
+            current.append("'")
+            continue
+        if current:
+            tokens.append("".join(current).strip("'"))
+            current = []
+    if current:
+        tokens.append("".join(current).strip("'"))
+    return [token for token in tokens if token]
 
 
 def wer(gold: str, pred: str) -> float:
@@ -60,6 +85,89 @@ def token_f1(gold: str, pred: str) -> float:
         return 0.0
     prec, rec = overlap / len(p), overlap / len(g)
     return 2 * prec * rec / (prec + rec)
+
+
+def _phonetic_key(token: str) -> str:
+    """Loose Roman-Hindi spelling key; never used for the primary exact reference."""
+    value = token.casefold()
+    replacements = (
+        ("chh", "ch"), ("ph", "f"), ("bh", "b"), ("kh", "k"),
+        ("gh", "g"), ("th", "t"), ("dh", "d"), ("sh", "s"),
+        ("zh", "j"), ("aa", "a"), ("ee", "i"), ("ii", "i"),
+        ("oo", "u"), ("uu", "u"), ("ai", "e"), ("au", "o"),
+    )
+    for source, target in replacements:
+        value = value.replace(source, target)
+    value = value.replace("q", "k").replace("c", "k").replace("w", "v")
+    if value.endswith("y"):
+        value = value[:-1] + "i"
+    if len(value) > 3 and value.endswith("a"):
+        value = value[:-1]
+    value = re.sub(r"m(?=$|[^aeiou])", "n", value)
+    value = re.sub(r"([aeiou])\1+", r"\1", value)
+    return value
+
+
+def _string_edit_distance(left: str, right: str) -> int:
+    previous = list(range(len(right) + 1))
+    for i, left_char in enumerate(left, 1):
+        current = [i]
+        for j, right_char in enumerate(right, 1):
+            current.append(min(
+                previous[j] + 1,
+                current[j - 1] + 1,
+                previous[j - 1] + (left_char != right_char),
+            ))
+        previous = current
+    return previous[-1]
+
+
+def phonetic_token_equal(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    left_key, right_key = _phonetic_key(left), _phonetic_key(right)
+    if left_key == right_key:
+        return True
+    longest = max(len(left_key), len(right_key))
+    if longest <= 3:
+        return False
+    distance = _string_edit_distance(left_key, right_key)
+    return distance <= 1 if longest <= 5 else (distance / longest) <= 0.34
+
+
+def phonetic_token_f1(gold: str, pred: str) -> float:
+    reference = normalize(gold)
+    hypothesis = normalize(pred)
+    if not reference and not hypothesis:
+        return 1.0
+    if not reference or not hypothesis:
+        return 0.0
+    unmatched = list(range(len(hypothesis)))
+    matches = 0
+    for token in reference:
+        found = next((index for index in unmatched if phonetic_token_equal(token, hypothesis[index])), None)
+        if found is None:
+            continue
+        unmatched.remove(found)
+        matches += 1
+    precision = matches / len(hypothesis)
+    recall = matches / len(reference)
+    return 0.0 if not matches else 2 * precision * recall / (precision + recall)
+
+
+def phonetic_wer(gold: str, pred: str) -> float:
+    reference = normalize(gold)
+    hypothesis = normalize(pred)
+    if not reference:
+        return 0.0 if not hypothesis else 1.0
+    previous = list(range(len(hypothesis) + 1))
+    for i, ref_token in enumerate(reference, 1):
+        current = [i]
+        for j, hyp_token in enumerate(hypothesis, 1):
+            substitution = previous[j - 1] + (not phonetic_token_equal(ref_token, hyp_token))
+            current.append(min(previous[j] + 1, current[j - 1] + 1, substitution))
+        previous = current
+    return previous[-1] / len(reference)
 
 
 def judge_meaning(gold: str, pred: str) -> float:
@@ -95,13 +203,12 @@ def critical_flip(gold: str, pred: str, must_have: list[str] | None = None) -> t
     reasons = []
     missing_nums = gf["numbers"] - pf["numbers"]
     if missing_nums:
-        reasons.append(f"number changed/dropped: {sorted(missing_nums)}")
+        reasons.append("number changed/dropped")
     # negation polarity: gold negated but pred isn't (or vice versa)
     if bool(gf["negations"]) != bool(pf["negations"]):
         reasons.append("negation polarity flipped")
-    for term in (must_have or []):
-        if term.lower() not in (pred or "").lower():
-            reasons.append(f"required term missing: {term!r}")
+    if any(term.lower() not in (pred or "").lower() for term in (must_have or [])):
+        reasons.append("required term missing")
     return (len(reasons) > 0, reasons)
 
 
