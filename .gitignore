@@ -9,3 +9,7 @@ data/hidden/
 # private dictation lab — your own voice + transcribed words, never publish
 lab_recordings/
 tools/recording_lab/
+bench/_log_*
+bench/_result_*
+bench/_stage*.json
+bench/_shims/
